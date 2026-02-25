@@ -28,30 +28,34 @@ export class BlobSerializerValueDeserializer {
         ]);
     })();
 
-    private readonly mBytes: Uint8Array;
-    private readonly mDataView: DataView;
-    private mOffset: number;
-
     /**
-     * Constructor.
+     * Deserialize a value from byte data.
      *
      * @param pData - The encoded byte data.
+     *
+     * @returns the decoded JavaScript value.
      */
-    public constructor(pData: Uint8Array) {
-        this.mBytes = pData;
-        this.mDataView = new DataView(pData.buffer, pData.byteOffset, pData.byteLength);
-        this.mOffset = 0;
+    public deserialize(pData: Uint8Array): unknown {
+        const lState: BlobSerializerValueDeserializerState = {
+            bytes: pData,
+            cursor: 0,
+            dataView: new DataView(pData.buffer, pData.byteOffset, pData.byteLength)
+        };
+
+        return this.decode(lState);
     }
 
     /**
-     * Decode the value starting from the current offset.
+     * Decode the value starting from the current cursor.
+     *
+     * @param pState - Current deserializer state.
      *
      * @returns the decoded JavaScript value.
      *
      * @throws Exception if an unknown type tag is encountered.
      */
-    public decode(): unknown {
-        const lTag: number = this.readNextBytesAsUint8();
+    private decode(pState: BlobSerializerValueDeserializerState): unknown {
+        const lTag: number = this.readNextBytesAsUint8(pState);
 
         switch (lTag) {
             case ValueTypeTag.Null:
@@ -61,17 +65,17 @@ export class BlobSerializerValueDeserializer {
             case ValueTypeTag.BooleanTrue:
                 return true;
             case ValueTypeTag.Number:
-                return this.decodeNumber();
+                return this.decodeNumber(pState);
             case ValueTypeTag.String:
-                return this.decodeString();
+                return this.decodeString(pState);
             case ValueTypeTag.Array:
-                return this.decodeArray();
+                return this.decodeArray(pState);
             case ValueTypeTag.Object:
-                return this.decodeRegisteredObject();
+                return this.decodeRegisteredObject(pState);
             case ValueTypeTag.ArrayBuffer:
-                return this.decodeArrayBuffer();
+                return this.decodeArrayBuffer(pState);
             case ValueTypeTag.TypedArray:
-                return this.decodeTypedArray();
+                return this.decodeTypedArray(pState);
             default:
                 throw new Exception(`Unknown value type tag: 0x${lTag.toString(16).padStart(2, '0')}`, this);
         }
@@ -80,12 +84,12 @@ export class BlobSerializerValueDeserializer {
     /**
      * Decode an array of values.
      */
-    private decodeArray(): Array<unknown> {
-        const lCount: number = this.readNextBytesAsUint32();
+    private decodeArray(pState: BlobSerializerValueDeserializerState): Array<unknown> {
+        const lCount: number = this.readNextBytesAsUint32(pState);
         const lArray: Array<unknown> = new Array<unknown>(lCount);
 
         for (let lIndex: number = 0; lIndex < lCount; lIndex++) {
-            lArray[lIndex] = this.decode();
+            lArray[lIndex] = this.decode(pState);
         }
 
         return lArray;
@@ -94,9 +98,9 @@ export class BlobSerializerValueDeserializer {
     /**
      * Decode an ArrayBuffer.
      */
-    private decodeArrayBuffer(): ArrayBuffer {
-        const lByteLength: number = this.readNextBytesAsUint32();
-        const lBytes: Uint8Array = this.readNextBytes(lByteLength);
+    private decodeArrayBuffer(pState: BlobSerializerValueDeserializerState): ArrayBuffer {
+        const lByteLength: number = this.readNextBytesAsUint32(pState);
+        const lBytes: Uint8Array = this.readNextBytes(pState, lByteLength);
         // Copy bytes into a fresh ArrayBuffer.
         const lBuffer: ArrayBuffer = new ArrayBuffer(lByteLength);
         new Uint8Array(lBuffer).set(lBytes);
@@ -106,17 +110,17 @@ export class BlobSerializerValueDeserializer {
     /**
      * Decode a float64 number.
      */
-    private decodeNumber(): number {
-        return this.readNextBytesAsFloat64();
+    private decodeNumber(pState: BlobSerializerValueDeserializerState): number {
+        return this.readNextBytesAsFloat64(pState);
     }
 
     /**
      * Decode a registered (decorated) object.
      */
-    private decodeRegisteredObject(): object {
+    private decodeRegisteredObject(pState: BlobSerializerValueDeserializerState): object {
         // Read UUID.
-        const lUuidByteLength: number = this.readNextBytesAsUint16();
-        const lUuid: string = this.readNextBytesAsString(lUuidByteLength);
+        const lUuidByteLength: number = this.readNextBytesAsUint16(pState);
+        const lUuid: string = this.readNextBytesAsString(pState, lUuidByteLength);
 
         // Resolve constructor.
         const lConstructor: IVoidParameterConstructor<object> = Serializer.classOfUuid(lUuid);
@@ -137,15 +141,15 @@ export class BlobSerializerValueDeserializer {
         }
 
         // Read properties.
-        const lPropertyCount: number = this.readNextBytesAsUint32();
+        const lPropertyCount: number = this.readNextBytesAsUint32(pState);
 
         for (let lPropertyIndex: number = 0; lPropertyIndex < lPropertyCount; lPropertyIndex++) {
             // Read key.
-            const lKeyByteLength: number = this.readNextBytesAsUint16();
-            const lBinaryKey: string = this.readNextBytesAsString(lKeyByteLength);
+            const lKeyByteLength: number = this.readNextBytesAsUint16(pState);
+            const lBinaryKey: string = this.readNextBytesAsString(pState, lKeyByteLength);
 
             // Decode value.
-            const lValue: unknown = this.decode();
+            const lValue: unknown = this.decode(pState);
 
             // Map binary key to property name (via alias or direct match).
             const lPropertyName: string = lAliasToPropertyName.get(lBinaryKey) ?? lBinaryKey;
@@ -160,18 +164,18 @@ export class BlobSerializerValueDeserializer {
     /**
      * Decode a UTF-8 string.
      */
-    private decodeString(): string {
-        const lByteLength: number = this.readNextBytesAsUint32();
-        return this.readNextBytesAsString(lByteLength);
+    private decodeString(pState: BlobSerializerValueDeserializerState): string {
+        const lByteLength: number = this.readNextBytesAsUint32(pState);
+        return this.readNextBytesAsString(pState, lByteLength);
     }
 
     /**
      * Decode a TypedArray.
      */
-    private decodeTypedArray(): TypedArray {
-        const lSubType: TypedArraySubType = this.readNextBytesAsUint8() as TypedArraySubType;
-        const lByteLength: number = this.readNextBytesAsUint32();
-        const lBytes: Uint8Array = this.readNextBytes(lByteLength);
+    private decodeTypedArray(pState: BlobSerializerValueDeserializerState): TypedArray {
+        const lSubType: TypedArraySubType = this.readNextBytesAsUint8(pState) as TypedArraySubType;
+        const lByteLength: number = this.readNextBytesAsUint32(pState);
+        const lBytes: Uint8Array = this.readNextBytes(pState, lByteLength);
 
         // Get the constructor for this sub-type.
         const lTypedArrayInformation: BlobSerializerValueDeserializerTypedArrayInfo | undefined = BlobSerializerValueDeserializer.mTypedArrayInfo.get(lSubType);
@@ -195,18 +199,18 @@ export class BlobSerializerValueDeserializer {
      *
      * @param pLength - Number of bytes to read.
      */
-    private readNextBytes(pLength: number): Uint8Array {
-        const lBytes: Uint8Array = this.mBytes.subarray(this.mOffset, this.mOffset + pLength);
-        this.mOffset += pLength;
+    private readNextBytes(pState: BlobSerializerValueDeserializerState, pLength: number): Uint8Array {
+        const lBytes: Uint8Array = pState.bytes.subarray(pState.cursor, pState.cursor + pLength);
+        pState.cursor += pLength;
         return lBytes;
     }
 
     /**
      * Read a float64 (little-endian) from the buffer and advance the offset.
      */
-    private readNextBytesAsFloat64(): number {
-        const lValue: number = this.mDataView.getFloat64(this.mOffset, true);
-        this.mOffset += 8;
+    private readNextBytesAsFloat64(pState: BlobSerializerValueDeserializerState): number {
+        const lValue: number = pState.dataView.getFloat64(pState.cursor, true);
+        pState.cursor += 8;
         return lValue;
     }
 
@@ -215,38 +219,44 @@ export class BlobSerializerValueDeserializer {
      *
      * @param pByteLength - Number of bytes of the UTF-8 encoded string.
      */
-    private readNextBytesAsString(pByteLength: number): string {
-        const lBytes: Uint8Array = this.readNextBytes(pByteLength);
+    private readNextBytesAsString(pState: BlobSerializerValueDeserializerState, pByteLength: number): string {
+        const lBytes: Uint8Array = this.readNextBytes(pState, pByteLength);
         return BlobSerializerValueDeserializer.mTextDecoder.decode(lBytes);
     }
 
     /**
      * Read a uint16 (little-endian) from the buffer and advance the offset.
      */
-    private readNextBytesAsUint16(): number {
-        const lValue: number = this.mDataView.getUint16(this.mOffset, true);
-        this.mOffset += 2;
+    private readNextBytesAsUint16(pState: BlobSerializerValueDeserializerState): number {
+        const lValue: number = pState.dataView.getUint16(pState.cursor, true);
+        pState.cursor += 2;
         return lValue;
     }
 
     /**
      * Read a uint32 (little-endian) from the buffer and advance the offset.
      */
-    private readNextBytesAsUint32(): number {
-        const lValue: number = this.mDataView.getUint32(this.mOffset, true);
-        this.mOffset += 4;
+    private readNextBytesAsUint32(pState: BlobSerializerValueDeserializerState): number {
+        const lValue: number = pState.dataView.getUint32(pState.cursor, true);
+        pState.cursor += 4;
         return lValue;
     }
 
     /**
      * Read a uint8 from the buffer and advance the offset.
      */
-    private readNextBytesAsUint8(): number {
-        const lValue: number = this.mDataView.getUint8(this.mOffset);
-        this.mOffset += 1;
+    private readNextBytesAsUint8(pState: BlobSerializerValueDeserializerState): number {
+        const lValue: number = pState.dataView.getUint8(pState.cursor);
+        pState.cursor += 1;
         return lValue;
     }
 }
+
+type BlobSerializerValueDeserializerState = {
+    bytes: Uint8Array;
+    cursor: number;
+    dataView: DataView;
+};
 
 type BlobSerializerValueDeserializerTypedArrayInfo = {
     subType: TypedArraySubType;
