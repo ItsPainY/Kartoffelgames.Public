@@ -144,6 +144,7 @@ export class BlobSerializer {
     private mTableOfContent: Map<string, BlobSerializerTableOfContentEntry>;
     private readonly mUnsavedEntries: Map<string, Uint8Array>;
     private readonly mValueSerializer: BlobSerializerValueSerializer;
+    private readonly mValueDeserializer: BlobSerializerValueDeserializer;
 
     /**
      * Get the list of available contents in the loaded blob.
@@ -174,6 +175,7 @@ export class BlobSerializer {
 
         // Create serializer/deserializer instance for encoding/decoding stored objects.
         this.mValueSerializer = new BlobSerializerValueSerializer();
+        this.mValueDeserializer = new BlobSerializerValueDeserializer();
     }
 
     /**
@@ -267,8 +269,7 @@ export class BlobSerializer {
         }
 
         // Decode.
-        const lDecoder: BlobSerializerValueDeserializer = new BlobSerializerValueDeserializer(lEntryData);
-        return lDecoder.decode() as T;
+        return this.mValueDeserializer.decode(lEntryData) as T;
     }
 
     /**
