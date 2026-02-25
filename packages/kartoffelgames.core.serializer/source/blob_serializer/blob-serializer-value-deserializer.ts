@@ -28,8 +28,8 @@ export class BlobSerializerValueDeserializer {
         ]);
     })();
 
-    private readonly mBytes: Uint8Array;
-    private readonly mDataView: DataView;
+    private mBytes: Uint8Array;
+    private mDataView: DataView;
     private mOffset: number;
 
     /**
@@ -37,10 +37,27 @@ export class BlobSerializerValueDeserializer {
      *
      * @param pData - The encoded byte data.
      */
-    public constructor(pData: Uint8Array) {
-        this.mBytes = pData;
-        this.mDataView = new DataView(pData.buffer, pData.byteOffset, pData.byteLength);
+    public constructor(pData?: Uint8Array) {
+        this.mBytes = new Uint8Array(0);
+        this.mDataView = new DataView(this.mBytes.buffer);
         this.mOffset = 0;
+
+        if (pData) {
+            this.setData(pData);
+        }
+    }
+
+    /**
+     * Deserialize a value from the provided byte data.
+     * Resets the internal cursor to the beginning of the provided buffer.
+     *
+     * @param pData - The encoded byte data.
+     *
+     * @returns the decoded JavaScript value.
+     */
+    public deserialize(pData: Uint8Array): unknown {
+        this.setData(pData);
+        return this.decode();
     }
 
     /**
@@ -75,6 +92,17 @@ export class BlobSerializerValueDeserializer {
             default:
                 throw new Exception(`Unknown value type tag: 0x${lTag.toString(16).padStart(2, '0')}`, this);
         }
+    }
+
+    /**
+     * Set the source data and reset the internal cursor.
+     *
+     * @param pData - The encoded byte data.
+     */
+    public setData(pData: Uint8Array): void {
+        this.mBytes = pData;
+        this.mDataView = new DataView(pData.buffer, pData.byteOffset, pData.byteLength);
+        this.mOffset = 0;
     }
 
     /**

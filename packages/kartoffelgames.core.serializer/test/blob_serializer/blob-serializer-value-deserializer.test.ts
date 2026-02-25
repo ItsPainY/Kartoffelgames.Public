@@ -3,6 +3,24 @@ import { BlobSerializerValueSerializer } from '../../source/blob_serializer/blob
 import { BlobSerializerValueDeserializer } from '../../source/blob_serializer/blob-serializer-value-deserializer.ts';
 import { Serializer } from '../../source/core/serializer.ts';
 
+Deno.test('BlobSerializerValueDeserializer.deserialize() - Reuse deserializer instance', () => {
+    // Setup.
+    const lEncoder: BlobSerializerValueSerializer = new BlobSerializerValueSerializer();
+    const lFirstValue: number = 42;
+    const lSecondValue: string = 'reuse';
+    const lFirstEncoded: Uint8Array = lEncoder.serialize(lFirstValue);
+    const lSecondEncoded: Uint8Array = lEncoder.serialize(lSecondValue);
+    const lDeserializer: BlobSerializerValueDeserializer = new BlobSerializerValueDeserializer();
+
+    // Process.
+    const lFirstResult: unknown = lDeserializer.deserialize(lFirstEncoded);
+    const lSecondResult: unknown = lDeserializer.deserialize(lSecondEncoded);
+
+    // Evaluation.
+    expect(lFirstResult).toBe(lFirstValue);
+    expect(lSecondResult).toBe(lSecondValue);
+});
+
 Deno.test('BlobSerializerValueDeserializer.decode() - Primitives', async (pContext) => {
     await pContext.step('Round-trip null', () => {
         // Setup.
